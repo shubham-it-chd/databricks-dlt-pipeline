@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: default
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: aspnetcore
+        image: mcr.microsoft.com/dotnet/samples:aspnetapp # Placeholder; replace with your custom image
+        ports:
+        - containerPort: 443
+        env:
+        - name: ASPNETCORE_URLS
+          value: "https://+:443"
+        - name: ASPNETCORE_Kestrel__Certificates__Default__Path
+          value: "/app/certs/tls.crt"
+        - name: ASPNETCORE_Kestrel__Certificates__Default__KeyPath
+          value: "/app/certs/tls.key"
+        volumeMounts:
+        - name: tls
+          mountPath: /app/certs
+          readOnly: true
+      volumes:
+      - name: tls
+        secret:
+          secretName: backend-tls-secret
