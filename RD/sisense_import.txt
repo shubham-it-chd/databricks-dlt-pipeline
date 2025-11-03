@@ -1,0 +1,63 @@
+# Install if needed (run once)
+%pip install sisense pandas
+
+from datetime import datetime
+from sisense import Sisense  # Sisense Python client
+import pandas as pd
+import os
+
+# Configuration
+server_url = "https://your-sisense-server.com"  # Your Sisense instance URL
+access_token = "your_api_access_token"  # From /authentication/login
+dashboard_id = "your_dashboard_id"  # e.g., "5e2a1bccbc60327e98fb4635"
+output_path = "/dbfs/FileStore/sisense_exports/"  # DBFS path for CSVs (optional intermediate step)
+table_name = "sisense_imported_data"  # Delta table name
+
+# Initialize API client
+api = Sisense(server_url, access_token)
+
+# Get dashboard details
+dashboard = api.dashboards.get(dashboard_id)
+widgets = dashboard.get('widgets', [])
+
+# List to hold all DataFrames (for union if desired)
+all_dfs = []
+
+for widget in widgets:
+    widget_id = widget['oid']
+    widget_title = widget.get('title', 'Untitled')
+    
+    try:
+        # Fetch widget data (use 'jaql' param for custom queries/filters if needed)
+        widget_data = api.widgets.get_data(widget_id, dashboard_id)
+        
+        # Extract metadata (columns) and data
+        columns = [col['caption'] for col in widget_data.get('metadata', {}).get('Columns', [])]
+        data_rows = widget_data.get('data', [])
+        
+        if data_rows:
+            df = pd.DataFrame(data_rows, columns=columns)
+            
+            # Save as CSV to DBFS (optional)
+            csv_filename = f"{widget_title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+            csv_path = os.path.join(output_path, csv_filename)
+            df.to_csv(csv_path, index=False)
+            print(f"Exported {widget_title} to {csv_path}")
+            
+            # Append to list for Delta table
+            all_dfs.append(df)
+        else:
+            print(f"No data for widget: {widget_title}")
+    except Exception as e:
+        print(f"Error exporting {widget_title}: {e}")
+
+# If multiple widgets, union them (or handle separately)
+if all_dfs:
+    combined_df = pd.concat(all_dfs, ignore_index=True) if len(all_dfs) > 1 else all_dfs[0]
+    
+    # Convert to Spark DF and save as Delta table
+    spark_df = spark.createDataFrame(combined_df)
+    spark_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table_name)
+    print(f"Data saved to Delta table: {table_name}")
+else:
+    print("No data exported.")
