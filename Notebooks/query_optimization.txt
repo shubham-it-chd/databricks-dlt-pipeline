@@ -1,0 +1,21 @@
+-- Create or Replace Table
+CREATE OR REPLACE TABLE my_table (
+    id INT,
+    name STRING,
+    age INT,
+    created_at TIMESTAMP
+)
+USING DELTA
+PARTITIONED BY (age)
+LOCATION '/mnt/delta/my_table';
+
+-- Optimize Table
+OPTIMIZE my_table ZORDER BY (id);
+
+-- Optional: Add clustering for better query performance
+ALTER TABLE my_table CLUSTER BY (id, name);
+
+
+--Dashboard
+--https://www.youtube.com/watch?v=OkbiAHR0xyQ
+--https://www.youtube.com/watch?v=ESEgW7rUdL0

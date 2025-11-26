@@ -1,0 +1,122 @@
+Step 1: Get Your API Token
+import requests
+import json
+
+# Configuration
+sisense_url = "https://your-sisense-server.com"  # Your Sisense base URL
+username = "your_admin_username"
+password = "your_password"
+
+# Login endpoint
+login_url = f"{sisense_url}/api/v1/authentication/login"
+login_payload = {"username": username, "password": password}
+
+response = requests.post(login_url, json=login_payload)
+if response.status_code == 200:
+    token = response.json()["access_token"]
+    print(f"Token obtained: {token[:20]}...")  # Truncate for security
+else:
+    raise Exception(f"Auth failed: {response.status_code} - {response.text}")
+
+# Reuse 'token' in subsequent calls
+headers = {"Authorization": f"Bearer {token}"}
+
+
+Step 2: List Available ElastiCubes (Datasources)
+
+# List all datasources (ElastiCubes)
+datasources_url = f"{sisense_url}/api/datasources"
+response = requests.get(datasources_url, headers=headers)
+
+if response.status_code == 200:
+    datasources = response.json()
+    cube_names = [ds["title"] for ds in datasources if ds["type"] == "elasticube"]  # Filter to ElastiCubes
+    print("Available ElastiCubes:", cube_names)
+else:
+    print(f"Error listing cubes: {response.status_code}")
+
+
+Step 3: List Tables in a Specific ElastiCube
+# Configuration
+cube_name = "YourElastiCubeName"  # From Step 2
+server_name = "LocalHost"  # Usually "LocalHost" for on-prem; check your setup
+
+# Endpoint for SQL queries (adapt path if using /api/datasources vs /api/elasticubes)
+sql_endpoint = f"{sisense_url}/api/datasources/{server_name}/{cube_name}/sql"
+
+# Query to list tables (try SHOW TABLES first; fallback to INFORMATION_SCHEMA)
+show_tables_query = "SHOW TABLES"
+response = requests.get(sql_endpoint, headers=headers, params={"query": show_tables_query, "format": "json"})
+
+tables = []
+if response.status_code == 200:
+    data = response.json()
+    if "values" in data:
+        tables = [row[0] for row in data["values"]]  # Assumes single-column response
+    print("Tables in cube:", tables)
+else:
+    print(f"Error: {response.status_code} - Try 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES'")
+    # Fallback query
+    fallback_query = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES"
+    response = requests.get(sql_endpoint, headers=headers, params={"query": fallback_query, "format": "json"})
+    if response.status_code == 200:
+        data = response.json()
+        tables = [row[0] for row in data["values"]]
+        print("Tables (fallback):", tables)
+
+
+Step 4: Export Full Data from Each Table to Databricks
+import requests
+import pandas as pd
+from pyspark.sql import SparkSession
+import io  # For in-memory CSV handling
+
+spark = SparkSession.builder.getOrCreate()  # Databricks Spark session
+
+# Configuration (from previous steps)
+cube_name = "YourElastiCubeName"
+server_name = "LocalHost"
+output_db = "sisense_cube_data"  # Catalog/schema for Delta tables
+tables = ["table1", "table2"]  # From Step 3, or hardcoded
+
+for table_name in tables:
+    print(f"Exporting table: {table_name}")
+    
+    # Full table query
+    query = f"SELECT * FROM {table_name}"
+    
+    # API call for CSV (direct download)
+    params = {"query": query, "format": "csv"}
+    response = requests.get(sql_endpoint, headers=headers, params=params)
+    
+    if response.status_code == 200:
+        # Read CSV from response content
+        csv_content = io.StringIO(response.text)
+        df = pd.read_csv(csv_content)
+        
+        # Convert to Spark DF and save as Delta table
+        spark_df = spark.createDataFrame(df)
+        table_fullname = f"{output_db}.{table_name}"
+        spark_df.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table_fullname)
+        print(f"Saved {len(df)} rows to Delta table: {table_fullname}")
+    else:
+        print(f"Error exporting {table_name}: {response.status_code} - {response.text}")
+
+# Example query in Databricks
+spark.sql("SELECT * FROM sisense_cube_data.table1 LIMIT 10").show()
+
+Step 5: Pagination for Large Tables (Add if Needed):
+limit = 100000  # Rows per chunk
+offset = 0
+all_data = []
+
+while True:
+    query = f"SELECT * FROM {table_name} LIMIT {limit} OFFSET {offset}"
+    # ... API call ...
+    chunk_df = pd.read_csv(io.StringIO(response.text))
+    if len(chunk_df) == 0:
+        break
+    all_data.append(chunk_df)
+    offset += limit
+
+df = pd.concat(all_data, ignore_index=True)
