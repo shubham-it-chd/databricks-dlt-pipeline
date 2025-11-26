@@ -99,5 +99,93 @@ resource "aws_vpc_endpoint_service" "rds_service" {
 }
 
 # RDS Security Group: Allow INGRESS from PrivateLink Endpoint SG
-resource "aws_security_group" "rds_sg" {
-  name_prefix
+
+```
+## 🎯 **Solution 2: VPC Peering (Alternative)**
+### Account A (Requester)
+```hcl
+resource "aws_vpc_peering_connection" "cross_account" {
+  peer_vpc_id   = data.terraform_remote_state.rds.outputs.vpc_id
+  vpc_id        = data.databricks_aws_workspace_conf.this.root_vpc_id
+  peer_owner_id = data.aws_caller_identity.rds.account_id
+  auto_accept   = false
+
+  accepter {
+    allow_remote_vpc_dns_resolution = true
+  }
+
+  requester {
+    allow_remote_vpc_dns_resolution = true
+  }
+}
+
+data "aws_caller_identity" "rds" {
+  provider = aws.rds
+}
+```
+### Account B (Accepter)
+```hcl
+resource "aws_vpc_peering_connection_accepter" "peer" {
+  vpc_peering_connection_id = data.terraform_remote_state.databricks.outputs.peering_id
+  auto_accept               = true
+}
+```
+### Route Tables (Both Accounts)
+```hcl
+# Add routes for peering (Account A)
+resource "aws_route" "peer_to_rds" {
+  route_table_id         = data.databricks_aws_workspace_conf.this.private_route_table_ids
+  destination_cidr_block = data.terraform_remote_state.rds.outputs.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection.cross_account.id
+}
+
+# Add routes for peering (Account B)
+resource "aws_route" "peer_to_databricks" {
+  route_table_id         = module.vpc.private_route_table_ids
+  destination_cidr_block = data.terraform_remote_state.databricks.outputs.vpc_cidr
+  vpc_peering_connection_id = aws_vpc_peering_connection_accepter.peer.vpc_peering_connection_id
+}
+```
+### Security Groups (Peering-Specific Ingress/Egress)
+```hcl
+# RDS SG (Account B): INGRESS from Databricks SG
+resource "aws_security_group_rule" "rds_ingress_from_databricks" {
+  type                     = "ingress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.rds_sg.id
+  source_security_group_id = data.terraform_remote_state.databricks.outputs.databricks_sg_id
+}
+
+# Databricks SG (Account A): EGRESS to RDS SG
+resource "aws_security_group_rule" "databricks_egress_to_rds" {
+  type                     = "egress"
+  from_port                = 5432
+  to_port                  = 5432
+  protocol                 = "tcp"
+  security_group_id        = aws_security_group.databricks_sg.id
+  source_security_group_id = data.terraform_remote_state.rds.outputs.rds_sg_id
+}
+```
+### Outputs for Peering: databricks-account/outputs.tf (Add to Existing) 
+```hcl
+output "peering_id" {
+  value = aws_vpc_peering_connection.cross_account.id
+}
+
+output "vpc_cidr" {
+  value = data.databricks_aws_workspace_conf.this.root_vpc_cidr
+}
+```
+### Outputs for Peering: rds-account/outputs.tf (Add to Existing)
+```hcl
+output "vpc_id" {
+  value = module.vpc.vpc_id
+}
+```
+## 🛡️ Ingress/Egress Summary Table
+```hcl
+
+```
+
