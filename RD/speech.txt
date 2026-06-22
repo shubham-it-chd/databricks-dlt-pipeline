@@ -1,0 +1,7 @@
+Today, I’m going to showcase how we can migrate legacy dashboards to Databricks. Before I begin, I’d like to highlight a feature that was released just three months ago, but we’re already using it daily. I believe not only we, but everyone working with Databricks is benefiting from it. This feature is called Genie Code. Previously, we used AI only as a simple code helper; we couldn’t fully plan or validate with it. But with Genie Code, we can plan, validate, and produce production-ready code. As you can see on the screen, we’re not just using it for dashboard migrations; we’re also building ETL pipelines, dashboards, and more—it’s truly everywhere in Databricks.
+
+
+Now, let me share my screen to walk you through how we can use Genie to achieve this. The dashboard you see is a legacy dashboard built in a different system, and we’ll quickly replicate it in Databricks. I’ve already downloaded its JSON, and we’ll feed it into a prompt for Genie. I’ve created a custom skill for this migration, so we can automate the process.
+
+Another powerful feature of Genie Code is context awareness. Because it runs inside Databricks, we can reference existing assets directly in our prompts. In our example, we referenced a Metric View so Genie could understand the business metrics and generate the dashboard correctly. As we all know, AI is only as good as the context we provide. Without proper context, it can make wrong assumptions, but with the right context, it can deliver highly accurate and meaningful results.
+
